@@ -15,50 +15,14 @@ import threading
 import time as time_module
 import logging
 
-# Set up logging at the top of your file
+# Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-def main():
-    try:
-        logger.info("Starting bot initialization...")
-
-        init_db()
-        logger.info("Database initialized")
-
-        # Schedule daily summary at 22:00
-        schedule.every().day.at("22:00").do(send_daily_summary)
-        logger.info("Scheduled daily summary")
-
-        # Start scheduler in a separate thread
-        scheduler_thread = threading.Thread(target=schedule_checker)
-        scheduler_thread.daemon = True
-        scheduler_thread.start()
-        logger.info("Scheduler thread started")
-
-        logger.info("🤖 Bot is running... / Бот запущен...")
-
-        # Add more detailed error handling for polling
-        try:
-            logger.info("Starting bot polling...")
-            bot.infinity_polling(timeout=60, long_polling_timeout=5)
-        except Exception as polling_error:
-            logger.error(f"Polling error: {polling_error}")
-            raise
-
-    except Exception as e:
-        logger.error(f"Main loop error: {e}")
-        time_module.sleep(10)
-        main()
-
-if __name__ == "__main__":
-    logger.info("Script started")
-    main()
-
-# Configure API keys from Replit secrets
+# Configure API keys
 TELEGRAM_TOKEN = os.environ['TELEGRAM_TOKEN']
 GEMINI_API_KEY = os.environ['GEMINI_API_KEY']
 
@@ -204,6 +168,55 @@ def init_db():
         logger.error(f"Database initialization error: {e}")
         raise
 
+def schedule_checker():
+    while True:
+        schedule.run_pending()
+        time_module.sleep(60)
+
+def send_daily_summary():
+    conn = sqlite3.connect('food_diary.db')
+    c = conn.cursor()
+
+    # Get all users
+    c.execute('SELECT DISTINCT user_id FROM food_diary')
+    users = c.fetchall()
+
+    current_date = datetime.now().strftime('%Y-%m-%d')
+
+    for user in users:
+        user_id = user[0]
+        lang = user_languages.get(user_id, 'en')
+
+        # Get daily calories using string date
+        c.execute('''SELECT SUM(calories) FROM food_diary 
+                    WHERE user_id = ? AND date = ?''', 
+                    (user_id, current_date))
+        total_calories = c.fetchone()[0] or 0
+
+        if total_calories:
+            prompt = f"""Generate a friendly daily calorie intake summary in {'Russian' if lang == 'ru' else 'English'} for:
+            Total calories: {total_calories}
+            Include:
+            1. The approximate nature of the calculations
+            2. A reasonable error margin (±10-15%)
+            3. A brief comment on whether this is within typical daily requirements
+            Keep it concise and friendly."""
+
+            response = text_model.generate_content(prompt)
+            summary = response.text
+
+            try:
+                bot.send_message(user_id, messages[lang]['daily_summary'] + summary)
+            except Exception as e:
+                logger.info(f"Error sending summary to user {user_id}: {e}")
+        else:
+            try:
+                bot.send_message(user_id, messages[lang]['no_entries'])
+            except Exception as e:
+                logger.info(f"Error sending no entries message to user {user_id}: {e}")
+
+    conn.close()
+
 @bot.message_handler(commands=['start', 'language'])
 def send_welcome(message):
     # First show language selection
@@ -236,7 +249,6 @@ def callback_language(call):
     and not message.text in ["📸 Add photo", "📸 Добавить фото", 
                            "⌨️ Add as text", "⌨️ Добавить текстом"]
     and not bot.get_state(message.from_user.id, message.chat.id))
-
 def echo_all(message):
     lang = user_languages.get(message.chat.id, 'en')
     bot.reply_to(message, messages[lang]['send_photo'])
@@ -319,129 +331,89 @@ def handle_food_text(message):
 @bot.message_handler(state=UserState.awaiting_calories)    
 def handle_calories(message):
     try:
-            print(f"Received calorie input: {message.text}")  # Debug print
-            calories = int(message.text)
-            user_id = message.from_user.id
-            current_date = datetime.now().strftime('%Y-%m-%d')
-            current_time = datetime.now().strftime('%H:%M:%S')
-            lang = user_languages.get(message.chat.id, 'en')
+        logger.info(f"Received calorie input: {message.text}")  # Logging calorie input
+        calories = int(message.text)
+        user_id = message.from_user.id
+        current_date = datetime.now().strftime('%Y-%m-%d')
+        current_time = datetime.now().strftime('%H:%M:%S')
+        lang = user_languages.get(message.chat.id, 'en')
+        logger.info(f"Processing calories for user {user_id}")
 
-            print(f"Processing calories for user {user_id}")  # Debug print
+        conn = sqlite3.connect('food_diary.db')
+        c = conn.cursor()
 
-            conn = sqlite3.connect('food_diary.db')
-            c = conn.cursor()
+        # Insert new calories
+        c.execute('''INSERT INTO food_diary (user_id, calories, date, time)
+                    VALUES (?, ?, ?, ?)''', (user_id, calories, current_date, current_time))
+        logger.info("Inserted calories into database")
 
-            # Insert new calories
-            c.execute('''INSERT INTO food_diary (user_id, calories, date, time)
-                        VALUES (?, ?, ?, ?)''', (user_id, calories, current_date, current_time))
-
-            print(f"Inserted calories into database")  # Debug print
-
-            # Get total calories for today
-            c.execute('''SELECT SUM(calories) FROM food_diary 
-                        WHERE user_id = ? AND date = ?''', 
-                        (user_id, current_date))
-            total_calories = c.fetchone()[0] or 0
-
-            print(f"Total calories for today: {total_calories}")  # Debug print
-
-            conn.commit()
-            conn.close()
-
-            # Prepare response message
-            if lang == 'en':
-                response = (f"✅ {calories} calories added to your food diary!\n\n"
-                           f"📊 Your total calories today: {total_calories} kcal")
-            else:
-                response = (f"✅ {calories} калорий добавлено в ваш дневник!\n\n"
-                           f"📊 Всего калорий за сегодня: {total_calories} ккал")
-
-            print(f"Sending response: {response}")  # Debug print
-            # Send the response as a reply
-            bot.reply_to(message, response)
-            print("Response sent")  # Debug print
-
-            # Clear the state
-            bot.delete_state(message.from_user.id, message.chat.id)
-            print("State cleared")  # Debug print
-
-    except ValueError as e:
-            print(f"ValueError occurred: {e}")  # Debug print
-            lang = user_languages.get(message.chat.id, 'en')
-            bot.reply_to(message, messages[lang]['invalid_calories'])
-    except Exception as e:
-            print(f"Unexpected error: {e}")  # Debug print
-            lang = user_languages.get(message.chat.id, 'en')
-            bot.reply_to(message, f"❌ An error occurred: {str(e)}")
-
-def send_daily_summary():
-    conn = sqlite3.connect('food_diary.db')
-    c = conn.cursor()
-
-    # Get all users
-    c.execute('SELECT DISTINCT user_id FROM food_diary')
-    users = c.fetchall()
-
-    current_date = datetime.now().strftime('%Y-%m-%d')
-
-    for user in users:
-        user_id = user[0]
-        lang = user_languages.get(user_id, 'en')
-
-        # Get daily calories using string date
+        # Get total calories for today
         c.execute('''SELECT SUM(calories) FROM food_diary 
                     WHERE user_id = ? AND date = ?''', 
                     (user_id, current_date))
         total_calories = c.fetchone()[0] or 0
+        logger.info(f"Total calories for today: {total_calories}")
 
-        if total_calories:
-            prompt = f"""Generate a friendly daily calorie intake summary in {'Russian' if lang == 'ru' else 'English'} for:
-            Total calories: {total_calories}
-            Include:
-            1. The approximate nature of the calculations
-            2. A reasonable error margin (±10-15%)
-            3. A brief comment on whether this is within typical daily requirements
-            Keep it concise and friendly."""
+        conn.commit()
+        conn.close()
 
-            response = text_model.generate_content(prompt)
-            summary = response.text
-
-            try:
-                bot.send_message(user_id, messages[lang]['daily_summary'] + summary)
-            except Exception as e:
-                print(f"Error sending summary to user {user_id}: {e}")
+        # Prepare response message
+        if lang == 'en':
+            response = (f"✅ {calories} calories added to your food diary!\n\n"
+                       f"📊 Your total calories today: {total_calories} kcal")
         else:
-            try:
-                bot.send_message(user_id, messages[lang]['no_entries'])
-            except Exception as e:
-                print(f"Error sending no entries message to user {user_id}: {e}")
+            response = (f"✅ {calories} калорий добавлено в ваш дневник!\n\n"
+                       f"📊 Всего калорий за сегодня: {total_calories} ккал")
 
-    conn.close()
+        logger.info(f"Sending response: {response}")
+        # Send the response as a reply
+        bot.reply_to(message, response)
+        logger.info("Response sent")
 
-def schedule_checker():
-    while True:
-        schedule.run_pending()
-        time_module.sleep(60)
+        # Clear the state
+        bot.delete_state(message.from_user.id, message.chat.id)
+        logger.info("State cleared")
 
+    except ValueError as e:
+        logger.info(f"ValueError occurred: {e}")
+        lang = user_languages.get(message.chat.id, 'en')
+        bot.reply_to(message, messages[lang]['invalid_calories'])
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        lang = user_languages.get(message.chat.id, 'en')
+        bot.reply_to(message, f"❌ An error occurred: {str(e)}")
 def main():
     try:
+        logger.info("Starting bot initialization...")
+
         init_db()
+        logger.info("Database initialized")
 
         # Schedule daily summary at 22:00
         schedule.every().day.at("22:00").do(send_daily_summary)
+        logger.info("Scheduled daily summary")
 
         # Start scheduler in a separate thread
         scheduler_thread = threading.Thread(target=schedule_checker)
         scheduler_thread.daemon = True
         scheduler_thread.start()
+        logger.info("Scheduler thread started")
 
-        print("🤖 Bot is running... / Бот запущен...")
+        logger.info("🤖 Bot is running... / Бот запущен...")
 
-        # Start the bot
-        bot.infinity_polling(timeout=60, long_polling_timeout=5)
+        # Add more detailed error handling for polling
+        try:
+            logger.info("Starting bot polling...")
+            bot.infinity_polling(timeout=60, long_polling_timeout=5)
+        except Exception as polling_error:
+            logger.error(f"Polling error: {polling_error}")
+            raise
 
     except Exception as e:
-        print(f"Main loop error: {e}")
-        # Attempt to restart if error occurs
+        logger.error(f"Main loop error: {e}")
         time_module.sleep(10)
         main()
+
+if __name__ == "__main__":
+    logger.info("Script started")
+    main()
