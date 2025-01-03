@@ -13,6 +13,50 @@ from datetime import datetime, time
 import schedule
 import threading
 import time as time_module
+import logging
+
+# Set up logging at the top of your file
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+def main():
+    try:
+        logger.info("Starting bot initialization...")
+
+        init_db()
+        logger.info("Database initialized")
+
+        # Schedule daily summary at 22:00
+        schedule.every().day.at("22:00").do(send_daily_summary)
+        logger.info("Scheduled daily summary")
+
+        # Start scheduler in a separate thread
+        scheduler_thread = threading.Thread(target=schedule_checker)
+        scheduler_thread.daemon = True
+        scheduler_thread.start()
+        logger.info("Scheduler thread started")
+
+        logger.info("🤖 Bot is running... / Бот запущен...")
+
+        # Add more detailed error handling for polling
+        try:
+            logger.info("Starting bot polling...")
+            bot.infinity_polling(timeout=60, long_polling_timeout=5)
+        except Exception as polling_error:
+            logger.error(f"Polling error: {polling_error}")
+            raise
+
+    except Exception as e:
+        logger.error(f"Main loop error: {e}")
+        time_module.sleep(10)
+        main()
+
+if __name__ == "__main__":
+    logger.info("Script started")
+    main()
 
 # Configure API keys from Replit secrets
 TELEGRAM_TOKEN = os.environ['TELEGRAM_TOKEN']
