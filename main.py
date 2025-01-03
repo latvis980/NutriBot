@@ -185,18 +185,24 @@ prompts = {
 
 # Database initialization
 def init_db():
-    conn = sqlite3.connect('food_diary.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (user_id INTEGER PRIMARY KEY, language TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS food_diary
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  user_id INTEGER,
-                  calories INTEGER,
-                  date TEXT,
-                  time TEXT)''')
-    conn.commit()
-    conn.close()
+    try:
+        logger.info("Starting database initialization...")
+        conn = sqlite3.connect('food_diary.db')
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS users
+                     (user_id INTEGER PRIMARY KEY, language TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS food_diary
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      user_id INTEGER,
+                      calories INTEGER,
+                      date TEXT,
+                      time TEXT)''')
+        conn.commit()
+        conn.close()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Database initialization error: {e}")
+        raise
 
 @bot.message_handler(commands=['start', 'language'])
 def send_welcome(message):
