@@ -1,0 +1,7 @@
+python-telegram-bot
+pillow
+google-generativeai
+Flask
+python-dotenv
+schedule
+requests

@@ -1,4 +1,6 @@
 import os
+from flask import Flask
+from threading import Thread
 import telebot
 from telebot.handler_backends import State, StatesGroup
 from telebot.storage import StateMemoryStorage
@@ -21,8 +23,6 @@ GEMINI_API_KEY = os.environ['GEMINI_API_KEY']
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
     raise ValueError("Missing required secrets. Please check Replit secrets.")
 
-# Rest of your code remains the same...
-
 # Initialize bot with state storage
 state_storage = StateMemoryStorage()
 bot = telebot.TeleBot(TELEGRAM_TOKEN, state_storage=state_storage)
@@ -39,6 +39,7 @@ text_model = genai.GenerativeModel('gemini-1.5-flash')
 class UserState(StatesGroup):
     language = State()
     awaiting_calories = State()
+    awaiting_food_text = State()
 
 # Dictionary to store user language preferences
 user_languages = {}
@@ -47,55 +48,57 @@ user_languages = {}
 messages = {
     'en': {
         'welcome': """
-👋 Welcome to the Food Recognition Bot!
+✨ Hey there! 
 
-Send me a photo of any food and I'll:
-1. 🔍 Identify what's in the image
-2. 📊 Estimate its nutritional value
-
-Just send a photo to get started!
+I can help you track your food and calculate calories.
+Choose how you want to add your food:
 """,
-        'analyzing': "🔍 Analyzing your food image...",
+        'analyzing': "🧪 Analyzing your food image...",
         'food_analysis': "🍽️ Food Analysis:\n",
         'nutritional_values': "📊 Estimated Nutritional Values:\n",
-        'approximate_note': "\n\n⚠️ Note: These are approximate values.",
+        'approximate_note': "🔮 Note: These are approximate values.",
         'error': "❌ Sorry, an error occurred: ",
         'send_photo': "Please send a food photo for analysis! 📸",
         'choose_language': "Please choose your preferred language / Пожалуйста, выберите язык:",
-        'language_set': "Language set to English! You can now send food photos for analysis.",
+        'language_set': "Language set to English! You can now track your food 🕺🏻",
         'save_calories': """Would you like to save the calories into your food diary?
-If this is a large portion and full-fat ingredients have been used, type in the upper value from the range I gave you.
-If it's a small portion and low-fat ingredients have been used, type in the lower value.""",
-        'calories_saved': "✅ Calories saved to your food diary!",
+
+🧈 If this is a large portion and full-fat ingredients have been used, type in the upper value from the range I gave you.
+
+🌿 If it's a small portion and low-fat ingredients have been used, type in the lower value.""",
+        'calories_saved': "✔️ Calories saved to your food diary!",
         'invalid_calories': "❌ Please enter a valid number for calories.",
         'daily_summary': "📊 Your daily calorie intake summary:\n",
-        'no_entries': "No food entries recorded today."
+        'no_entries': "No food entries recorded today.",
+        'text_input': "Please describe your food in detail (e.g., 'grilled chicken breast with rice and vegetables')",
+        'analyzing_text': "🔍 Analyzing your food description..."
     },
     'ru': {
         'welcome': """
-👋 Добро пожаловать в бот распознавания еды!
+✨ Привет!
 
-Отправьте мне фотографию любого блюда, и я:
-1. 🔍 Определю, что на фотографии
-2. 📊 Оценю пищевую ценность
-
-Просто отправьте фото, чтобы начать!
+Я помогу вам отслеживать питание и считать калории.
+Выберите, как вы хотите добавить еду:
 """,
-        'analyzing': "🔍 Анализирую ваше фото...",
+        'analyzing': "🧪 Анализирую ваше фото...",
         'food_analysis': "🍽️ Анализ блюда:\n",
         'nutritional_values': "📊 Примерная пищевая ценность:\n",
-        'approximate_note': "\n\n⚠️ Примечание: Это приблизительные значения.",
+        'approximate_note': "🔮 Примечание: Это приблизительные значения.",
         'error': "❌ Извините, произошла ошибка: ",
         'send_photo': "Пожалуйста, отправьте фотографию еды для анализа! 📸",
         'choose_language': "Please choose your preferred language / Пожалуйста, выберите язык:",
-        'language_set': "Язык установлен на русский! Теперь вы можете отправлять фотографии еды для анализа.",
+        'language_set': "Давайте начнём вести дневник калорий 🕺🏻",
         'save_calories': """Хотите сохранить калории в дневник питания?
-Если это большая порция и использовались жирные ингредиенты, введите верхнее значение из указанного диапазона.
-Если порция маленькая и использовались низкокалорийные ингредиенты, введите нижнее значение.""",
-        'calories_saved': "✅ Калории сохранены в ваш дневник!",
+
+🧈 Если это большая порция и использовались жирные ингредиенты, введите верхнее значение из указанного диапазона.
+
+🌿 Если порция маленькая и использовались низкокалорийные ингредиенты, введите нижнее значение.""",
+        'calories_saved': "✔️ Калории сохранены в ваш дневник!",
         'invalid_calories': "❌ Пожалуйста, введите корректное число калорий.",
         'daily_summary': "📊 Итоги вашего дневного потребления калорий:\n",
-        'no_entries': "Сегодня нет записей о приёме пищи."
+        'no_entries': "Сегодня нет записей о приёме пищи.",
+        'text_input': "Пожалуйста, опишите вашу еду подробно (например, 'куриная грудка на гриле с рисом и овощами')",
+        'analyzing_text': "🔍 Анализирую описание вашей еды..."
     }
 }
 # Gemini prompts
@@ -154,9 +157,10 @@ def init_db():
 
 @bot.message_handler(commands=['start', 'language'])
 def send_welcome(message):
+    # First show language selection
     markup = types.InlineKeyboardMarkup()
-    btn_en = types.InlineKeyboardButton("English 🇬🇧", callback_data='lang_en')
-    btn_ru = types.InlineKeyboardButton("Русский 🇷🇺", callback_data='lang_ru')
+    btn_en = types.InlineKeyboardButton("English", callback_data='lang_en')
+    btn_ru = types.InlineKeyboardButton("Русский", callback_data='lang_ru')
     markup.add(btn_en, btn_ru)
     bot.reply_to(message, messages['en']['choose_language'], reply_markup=markup)
 
@@ -165,8 +169,40 @@ def callback_language(call):
     lang = call.data.split('_')[1]
     user_languages[call.message.chat.id] = lang
     bot.answer_callback_query(call.id)
+
+    # Send welcome message
     bot.send_message(call.message.chat.id, messages[lang]['language_set'])
-    bot.send_message(call.message.chat.id, messages[lang]['welcome'])
+
+    # Create keyboard with input method buttons
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    if lang == 'en':
+        markup.add("📸 Add photo", "⌨️ Add as text")
+    else:
+        markup.add("📸 Добавить фото", "⌨️ Добавить текстом")
+
+    bot.send_message(call.message.chat.id, messages[lang]['welcome'], reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.content_type == 'text' 
+    and not message.text.startswith('/')
+    and not message.text in ["📸 Add photo", "📸 Добавить фото", 
+                           "⌨️ Add as text", "⌨️ Добавить текстом"]
+    and not bot.get_state(message.from_user.id, message.chat.id))
+
+def echo_all(message):
+    lang = user_languages.get(message.chat.id, 'en')
+    bot.reply_to(message, messages[lang]['send_photo'])
+
+@bot.message_handler(func=lambda message: message.text in ["📸 Add photo", "📸 Добавить фото", 
+     "⌨️ Add as text", "⌨️ Добавить текстом"])
+def handle_input_choice(message):
+    lang = user_languages.get(message.chat.id, 'en')
+    if message.text in ["📸 Add photo", "📸 Добавить фото"]:
+        bot.delete_state(message.from_user.id, message.chat.id)  # Clear any existing state
+        bot.reply_to(message, messages[lang]['send_photo'])
+    else:
+        # Set state before sending message
+        bot.set_state(message.from_user.id, UserState.awaiting_food_text, message.chat.id)
+        bot.reply_to(message, messages[lang]['text_input'])
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
@@ -204,6 +240,31 @@ def handle_photo(message):
         bot.set_state(message.from_user.id, UserState.awaiting_calories, message.chat.id)
 
     except Exception as e:
+        bot.reply_to(message, messages[lang]['error'] + str(e))
+
+@bot.message_handler(state=UserState.awaiting_food_text)
+def handle_food_text(message):
+    try:
+        lang = user_languages.get(message.chat.id, 'en')
+
+        # Send processing message
+        bot.reply_to(message, messages[lang]['analyzing_text'])
+
+        # Get nutritional estimation using text description
+        nutrition_response = text_model.generate_content(prompts[lang]['nutrition'].format(message.text))
+        nutrition_info = nutrition_response.text
+
+        bot.reply_to(message, 
+                    messages[lang]['nutritional_values'] + 
+                    nutrition_info + 
+                    messages[lang]['approximate_note'])
+
+        # Ask about saving calories
+        bot.reply_to(message, messages[lang]['save_calories'])
+        bot.set_state(message.from_user.id, UserState.awaiting_calories, message.chat.id)
+
+    except Exception as e:
+        bot.delete_state(message.from_user.id, message.chat.id)  # Clear state on error
         bot.reply_to(message, messages[lang]['error'] + str(e))
 
 @bot.message_handler(state=UserState.awaiting_calories)    
@@ -264,14 +325,6 @@ def handle_calories(message):
             lang = user_languages.get(message.chat.id, 'en')
             bot.reply_to(message, f"❌ An error occurred: {str(e)}")
 
-# Modify the default handler to only respond to text messages that aren't commands
-@bot.message_handler(func=lambda message: message.content_type == 'text' and not message.text.startswith('/'))
-def echo_all(message):
-    # Only prompt for photo if not in any state
-    if not bot.get_state(message.from_user.id, message.chat.id):
-        lang = user_languages.get(message.chat.id, 'en')
-        bot.reply_to(message, messages[lang]['send_photo'])
-
 def send_daily_summary():
     conn = sqlite3.connect('food_diary.db')
     c = conn.cursor()
@@ -322,18 +375,30 @@ def schedule_checker():
         time_module.sleep(60)
 
 def main():
-    init_db()
+    try:
+        init_db()
 
-    # Schedule daily summary at 22:00
-    schedule.every().day.at("22:00").do(send_daily_summary)
+        # Schedule daily summary at 22:00
+        schedule.every().day.at("22:00").do(send_daily_summary)
 
-    # Start scheduler in a separate thread
-    scheduler_thread = threading.Thread(target=schedule_checker)
-    scheduler_thread.daemon = True
-    scheduler_thread.start()
+        # Start scheduler in a separate thread
+        scheduler_thread = threading.Thread(target=schedule_checker)
+        scheduler_thread.daemon = True
+        scheduler_thread.start()
 
-    print("🤖 Bot is running... / Бот запущен...")
-    bot.infinity_polling()
+        print("🤖 Bot is running... / Бот запущен...")
+
+        # Start the keep-alive server
+        keep_alive()
+
+        # Start the bot
+        bot.infinity_polling(timeout=60, long_polling_timeout = 5)
+
+    except Exception as e:
+        print(f"Main loop error: {e}")
+        # Attempt to restart if error occurs
+        time_module.sleep(10)
+        main()
 
 if __name__ == "__main__":
     main()
