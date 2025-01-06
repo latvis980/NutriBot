@@ -369,7 +369,7 @@ def handle_food_text(message):
                 lang = get_user_language_safe(message.chat.id)
                 bot.reply_to(message, messages[lang]['error'] + str(e), parse_mode='HTML')
 
-        @bot.message_handler(state=UserState.awaiting_calories)
+@bot.message_handler(state=UserState.awaiting_calories)
 def handle_calories(message):
             try:
                 logger.info(f"Received calorie input: {message.text}")
