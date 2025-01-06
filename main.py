@@ -42,12 +42,17 @@ except Exception as e:
     raise
     
 # Set up logging with more detailed format
+# Set up logging with more detailed format
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    force=True
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Add startup banner
+logger.info("=" * 50)
+logger.info("Starting NutriBot")
+logger.info("=" * 50)
 
 try:
     # Add startup logging
@@ -463,27 +468,24 @@ def handle_calories(message):
 
 def main():
     try:
+        logger.info("Starting main function")
+
         # Initialize database
+        logger.info("Initializing database...")
         init_database()
+        logger.info("Database initialized successfully")
 
-        # Schedule daily summary at 22:00
-        schedule.every().day.at("22:00").do(send_daily_summary)
-
-        # Start scheduler in a separate thread
-        scheduler_thread = threading.Thread(target=schedule_checker)
-        scheduler_thread.daemon = True
-        scheduler_thread.start()
-
-        print("🤖 Bot is running... / Бот запущен...")
-
-
-        # Start the bot
-        bot.infinity_polling(timeout=60, long_polling_timeout = 5)
+        logger.info("Starting bot polling...")
+        bot.infinity_polling(timeout=60, long_polling_timeout=5)
 
     except Exception as e:
-        print(f"Main loop error: {e}")
+        logger.error(f"Main loop error: {str(e)}", exc_info=True)
         time_module.sleep(10)
         main()
     finally:
         if db:
+            logger.info("Closing database connection...")
             db.close()
+
+if __name__ == "__main__":
+    main()
