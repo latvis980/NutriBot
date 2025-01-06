@@ -14,6 +14,25 @@ import time as time_module
 import logging
 from database_handler import init_database, db
 
+
+# Set up logging with more detailed format
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    force=True
+)
+logger = logging.getLogger(__name__)
+
+# Add startup logging
+logger.info("Bot startup initiated")
+logger.info("Checking environment variables...")
+
+# Check environment variables
+for var in ['TELEGRAM_TOKEN', 'GEMINI_API_KEY', 'DATABASE_URL']:
+    if os.environ.get(var):
+        logger.info(f"{var} is set")
+    else:
+        logger.error(f"{var} is not set!")
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
