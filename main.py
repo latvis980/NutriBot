@@ -13,6 +13,7 @@ import threading
 import time as time_module
 import logging
 from database_handler import init_database, db
+import psycopg2
 
 
 import os
