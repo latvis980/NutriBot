@@ -13,8 +13,6 @@ import threading
 import time as time_module
 import logging
 from database_handler import init_database, db
-
-
 # Set up logging with more detailed format
 logging.basicConfig(
     level=logging.INFO,
@@ -23,21 +21,42 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Add startup logging
-logger.info("Bot startup initiated")
-logger.info("Checking environment variables...")
+try:
+    # Add startup logging
+    logger.info("Bot startup initiated")
+    logger.info("Checking environment variables...")
 
-# Check environment variables
-for var in ['TELEGRAM_TOKEN', 'GEMINI_API_KEY', 'DATABASE_URL']:
-    if os.environ.get(var):
-        logger.info(f"{var} is set")
-    else:
-        logger.error(f"{var} is not set!")
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+    # Check environment variables and initialize them
+    required_vars = ['TELEGRAM_TOKEN', 'GEMINI_API_KEY', 'DATABASE_URL']
+    for var in required_vars:
+        value = os.environ.get(var)
+        if value:
+            logger.info(f"{var} is set")
+        else:
+            logger.error(f"{var} is not set!")
+            raise ValueError(f"Missing required environment variable: {var}")
+
+    # Configure API keys
+    TELEGRAM_TOKEN = os.environ['TELEGRAM_TOKEN']
+    GEMINI_API_KEY = os.environ['GEMINI_API_KEY']
+    logger.info("API keys loaded successfully")
+
+    # Initialize bot with state storage
+    logger.info("Initializing bot...")
+    state_storage = StateMemoryStorage()
+    bot = telebot.TeleBot(TELEGRAM_TOKEN, state_storage=state_storage)
+    logger.info("Bot initialized successfully")
+
+    # Initialize Gemini
+    logger.info("Initializing Gemini...")
+    genai.configure(api_key=GEMINI_API_KEY)
+    vision_model = genai.GenerativeModel('gemini-1.5-flash')
+    text_model = genai.GenerativeModel('gemini-1.5-flash')
+    logger.info("Gemini initialized successfully")
+
+except Exception as e:
+    logger.error(f"Initialization error: {str(e)}", exc_info=True)
+    raise
 
 # Helper function to convert markdown to HTML
 def format_nutrition_response(text):
