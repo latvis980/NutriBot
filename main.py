@@ -326,25 +326,26 @@ def handle_photo(message):
 
         # Get and format nutritional info
         nutrition_response = text_model.generate_content(prompts[lang]['nutrition'].format(food_description))
-                nutrition_info = format_nutrition_response(nutrition_response.text)
+        nutrition_info = format_nutrition_response(nutrition_response.text)
 
-                formatted_response = (
+        formatted_response = (
                     messages[lang]['nutritional_values'] + 
                     '\n' + nutrition_info + 
                     messages[lang]['approximate_note']
                 )
 
-                bot.reply_to(message, formatted_response, parse_mode='HTML')
-                bot.reply_to(message, messages[lang]['save_calories'], parse_mode='HTML')
-                bot.set_state(message.from_user.id, UserState.awaiting_calories, message.chat.id)
+        bot.reply_to(message, formatted_response, parse_mode='HTML')
+        bot.reply_to(message, messages[lang]['save_calories'], parse_mode='HTML')
+        bot.set_state(message.from_user.id, UserState.awaiting_calories, message.chat.id)
 
-            except Exception as e:
-                logger.error(f"Error in handle_photo: {e}")
-                lang = get_user_language_safe(message.chat.id)
-                bot.reply_to(message, messages[lang]['error'] + str(e), parse_mode='HTML')
+        except Exception as e:
+        logger.error(f"Error in handle_photo: {e}")
+        lang = get_user_language_safe(message.chat.id)
+        
+        bot.reply_to(message, messages[lang]['error'] + str(e), parse_mode='HTML')
 
-        @bot.message_handler(state=UserState.awaiting_food_text)
-        def handle_food_text(message):
+@bot.message_handler(state=UserState.awaiting_food_text)
+def handle_food_text(message):
             try:
                 lang = get_user_language_safe(message.chat.id)
                 bot.reply_to(message, messages[lang]['analyzing_text'], parse_mode='HTML')
@@ -369,7 +370,7 @@ def handle_photo(message):
                 bot.reply_to(message, messages[lang]['error'] + str(e), parse_mode='HTML')
 
         @bot.message_handler(state=UserState.awaiting_calories)
-        def handle_calories(message):
+def handle_calories(message):
             try:
                 logger.info(f"Received calorie input: {message.text}")
                 calories = int(message.text)
@@ -413,42 +414,42 @@ def handle_photo(message):
                 lang = get_user_language_safe(message.chat.id)
                 bot.reply_to(message, f"❌ An error occurred: {str(e)}")
 
-        def error_handler(message):
-            logger.error(f"Telegram error: {message}")
+def error_handler(message):
+    logger.error(f"Telegram error: {message}")
 
-        def main():
-            try:
-                logger.info("Starting main function")
+def main():
+    try:
+        logger.info("Starting main function")
 
-                # Initialize database
-                logger.info("Initializing database...")
-                init_database()
-                logger.info("Database initialized successfully")
+        # Initialize database
+        logger.info("Initializing database...")
+        init_database()
+        logger.info("Database initialized successfully")
 
-                # Register error handler
-                bot.register_middleware_handler(error_handler, update_types=['update'])
+        # Register error handler
+        bot.register_middleware_handler(error_handler, update_types=['update'])
 
-                # Schedule daily summary
-                schedule.every().day.at("22:00").do(send_daily_summary)
+        # Schedule daily summary
+        schedule.every().day.at("22:00").do(send_daily_summary)
 
-                # Start scheduler thread
-                scheduler_thread = threading.Thread(target=schedule_checker)
-                scheduler_thread.daemon = True
-                scheduler_thread.start()
-                logger.info("Scheduler started")
+        # Start scheduler thread
+        scheduler_thread = threading.Thread(target=schedule_checker)
+        scheduler_thread.daemon = True
+        scheduler_thread.start()
+        logger.info("Scheduler started")
 
-                # Start bot
-                logger.info("Starting bot polling...")
-                bot.infinity_polling(timeout=60, long_polling_timeout=5)
+        # Start bot
+        logger.info("Starting bot polling...")
+        bot.infinity_polling(timeout=60, long_polling_timeout=5)
 
-            except Exception as e:
-                logger.error(f"Main loop error: {str(e)}", exc_info=True)
-                time_module.sleep(10)
-                main()
-            finally:
-                if db:
-                    logger.info("Closing database connection...")
-                    db.close()
+    except Exception as e:
+        logger.error(f"Main loop error: {str(e)}", exc_info=True)
+        time_module.sleep(10)
+        main()
+    finally:
+        if db:
+            logger.info("Closing database connection...")
+            db.close()
 
-        if __name__ == "__main__":
-            main()
+if __name__ == "__main__":
+    main()
