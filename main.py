@@ -13,6 +13,33 @@ import threading
 import time as time_module
 import logging
 from database_handler import init_database, db
+
+
+import os
+
+print("Direct environment variable check:")
+print(f"TELEGRAM_TOKEN exists: {'TELEGRAM_TOKEN' in os.environ}")
+print(f"GEMINI_API_KEY exists: {'GEMINI_API_KEY' in os.environ}")
+print(f"DATABASE_URL exists: {'DATABASE_URL' in os.environ}")
+
+try:
+    print("\nTesting Telegram Bot...")
+    bot = telebot.TeleBot(os.environ['TELEGRAM_TOKEN'])
+    print("Telegram Bot created successfully")
+
+    print("\nTesting Gemini...")
+    genai.configure(api_key=os.environ['GEMINI_API_KEY'])
+    print("Gemini configured successfully")
+
+    print("\nTesting Database...")
+    conn = psycopg2.connect(os.environ['DATABASE_URL'])
+    conn.close()
+    print("Database connection successful")
+
+except Exception as e:
+    print(f"Error during testing: {str(e)}")
+    raise
+    
 # Set up logging with more detailed format
 logging.basicConfig(
     level=logging.INFO,
