@@ -43,6 +43,12 @@ try:
             raise ValueError(f"Missing required environment variable: {var}")
         logger.info(f"{var} is set")
 
+    # Initialize database first
+    logger.info("Initializing database...")
+    global db
+    db = init_database()
+    logger.info("Database initialized successfully")
+    
     # Enable middleware
     telebot.apihelper.ENABLE_MIDDLEWARE = True
 
@@ -429,11 +435,6 @@ def error_handler(bot_instance, update):
 def main():
     try:
         logger.info("Starting main function")
-
-        # Initialize database
-        logger.info("Initializing database...")
-        init_database()
-        logger.info("Database initialized successfully")
 
         # Schedule daily summary
         schedule.every().day.at("22:00").do(send_daily_summary)
