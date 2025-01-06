@@ -1,5 +1,4 @@
 import os
-from threading import Thread
 import telebot
 from telebot.handler_backends import State, StatesGroup
 from telebot.storage import StateMemoryStorage
@@ -8,12 +7,12 @@ import google.generativeai as genai
 from PIL import Image
 import io
 import requests
-import sqlite3
 from datetime import datetime, time
 import schedule
 import threading
 import time as time_module
 import logging
+from database_handler import init_database, db
 
 # Set up logging
 logging.basicConfig(
@@ -77,9 +76,6 @@ class UserState(StatesGroup):
     awaiting_calories = State()
     awaiting_food_text = State()
 
-
-# Dictionary to store user language preferences
-user_languages = {}
 
 # Messages dictionary with HTML formatting
 messages = {
@@ -191,81 +187,44 @@ prompts = {
     }
 }
 
-
-# Database initialization
-def init_db():
-    try:
-        logger.info("Starting database initialization...")
-        conn = sqlite3.connect('food_diary.db')
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS users
-                     (user_id INTEGER PRIMARY KEY, language TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS food_diary
-                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                      user_id INTEGER,
-                      calories INTEGER,
-                      date TEXT,
-                      time TEXT)''')
-        conn.commit()
-        conn.close()
-        logger.info("Database initialized successfully")
-    except Exception as e:
-        logger.error(f"Database initialization error: {e}")
-        raise
-
-
 def schedule_checker():
     while True:
         schedule.run_pending()
         time_module.sleep(60)
 
-
 def send_daily_summary():
-    conn = sqlite3.connect('food_diary.db')
-    c = conn.cursor()
+        try:
+            # Get all users who have food diary entries
+            daily_summaries = db.get_all_daily_summaries()
 
-    # Get all users
-    c.execute('SELECT DISTINCT user_id FROM food_diary')
-    users = c.fetchall()
+            for user_id, total_calories in daily_summaries:
+                try:
+                    lang = db.get_user_language(user_id)
 
-    current_date = datetime.now().strftime('%Y-%m-%d')
+                    if total_calories:
+                        prompt = f"""Generate a friendly daily calorie intake summary in {'Russian' if lang == 'ru' else 'English'} for:
+                        Total calories: {total_calories}
+                        Include:
+                        1. The approximate nature of the calculations
+                        2. A reasonable error margin (±10-15%)
+                        3. A brief comment on whether this is within typical daily requirements
+                        Keep it concise and friendly."""
 
-    for user in users:
-        user_id = user[0]
-        lang = user_languages.get(user_id, 'en')
+                        response = text_model.generate_content(prompt)
+                        summary = response.text
 
-        # Get daily calories using string date
-        c.execute(
-            '''SELECT SUM(calories) FROM food_diary 
-                    WHERE user_id = ? AND date = ?''', (user_id, current_date))
-        total_calories = c.fetchone()[0] or 0
-
-        if total_calories:
-            prompt = f"""Generate a friendly daily calorie intake summary in {'Russian' if lang == 'ru' else 'English'} for:
-            Total calories: {total_calories}
-            Include:
-            1. The approximate nature of the calculations
-            2. A reasonable error margin (±10-15%)
-            3. A brief comment on whether this is within typical daily requirements
-            Keep it concise and friendly."""
-
-            response = text_model.generate_content(prompt)
-            summary = response.text
-
-            try:
-                bot.send_message(user_id,
-                                 messages[lang]['daily_summary'] + summary)
-            except Exception as e:
-                logger.info(f"Error sending summary to user {user_id}: {e}")
-        else:
-            try:
-                bot.send_message(user_id, messages[lang]['no_entries'])
-            except Exception as e:
-                logger.info(
-                    f"Error sending no entries message to user {user_id}: {e}")
-
-    conn.close()
-
+                        bot.send_message(user_id,
+                                        messages[lang]['daily_summary'] + summary,
+                                        parse_mode='HTML')
+                    else:
+                        bot.send_message(user_id, 
+                                        messages[lang]['no_entries'],
+                                        parse_mode='HTML')
+                except Exception as e:
+                    logger.error(f"Error sending summary to user {user_id}: {e}")
+        except Exception as e:
+            logger.error(f"Error in send_daily_summary: {e}")
+            
 
 @bot.message_handler(commands=['start', 'language'])
 def send_welcome(message):
@@ -283,7 +242,7 @@ def send_welcome(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('lang_'))
 def callback_language(call):
     lang = call.data.split('_')[1]
-    user_languages[call.message.chat.id] = lang
+    db.save_user_language(call.message.chat.id, lang)
     bot.answer_callback_query(call.id)
 
     # Send welcome message
@@ -311,7 +270,7 @@ def callback_language(call):
         "⌨️ Добавить текстом"
     ] and not bot.get_state(message.from_user.id, message.chat.id))
 def echo_all(message):
-    lang = user_languages.get(message.chat.id, 'en')
+    lang = db.get_user_language(message.chat.id)
     bot.reply_to(message, messages[lang]['send_photo'])
 
 
@@ -319,7 +278,7 @@ def echo_all(message):
     "📸 Add photo", "📸 Добавить фото", "⌨️ Add as text", "⌨️ Добавить текстом"
 ])
 def handle_input_choice(message):
-    lang = user_languages.get(message.chat.id, 'en')
+    lang = db.get_user_language(message.chat.id)
     if message.text in ["📸 Add photo", "📸 Добавить фото"]:
         bot.delete_state(message.from_user.id,
                          message.chat.id)  # Clear any existing state
@@ -334,7 +293,7 @@ def handle_input_choice(message):
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     try:
-        lang = user_languages.get(message.chat.id, 'en')
+        lang = db.get_user_language(message.chat.id)
         bot.reply_to(message, messages[lang]['analyzing'], parse_mode='HTML')
 
         # Get photo file and process image...
@@ -371,7 +330,7 @@ def handle_photo(message):
 @bot.message_handler(state=UserState.awaiting_food_text)
 def handle_food_text(message):
     try:
-        lang = user_languages.get(message.chat.id, 'en')
+        lang = db.get_user_language(message.chat.id)
         bot.reply_to(message, messages[lang]['analyzing_text'], parse_mode='HTML')
 
         nutrition_response = text_model.generate_content(prompts[lang]['nutrition'].format(message.text))
@@ -394,34 +353,20 @@ def handle_food_text(message):
 @bot.message_handler(state=UserState.awaiting_calories)
 def handle_calories(message):
     try:
-        logger.info(
-            f"Received calorie input: {message.text}")  # Logging calorie input
+        logger.info(f"Received calorie input: {message.text}")
         calories = int(message.text)
         user_id = message.from_user.id
-        current_date = datetime.now().strftime('%Y-%m-%d')
-        current_time = datetime.now().strftime('%H:%M:%S')
-        lang = user_languages.get(message.chat.id, 'en')
+        lang = db.get_user_language(message.chat.id)
         logger.info(f"Processing calories for user {user_id}")
 
-        conn = sqlite3.connect('food_diary.db')
-        c = conn.cursor()
+        # Save the food entry
+        db.save_food_entry(user_id, calories)
+        logger.info("Calories saved to database")
 
-        # Insert new calories
-        c.execute(
-            '''INSERT INTO food_diary (user_id, calories, date, time)
-                    VALUES (?, ?, ?, ?)''',
-            (user_id, calories, current_date, current_time))
-        logger.info("Inserted calories into database")
-
-        # Get total calories for today
-        c.execute(
-            '''SELECT SUM(calories) FROM food_diary 
-                    WHERE user_id = ? AND date = ?''', (user_id, current_date))
-        total_calories = c.fetchone()[0] or 0
+        # Get daily summary entries
+        daily_entries = db.get_daily_summary(user_id)
+        total_calories = sum(entry[0] for entry in daily_entries)
         logger.info(f"Total calories for today: {total_calories}")
-
-        conn.commit()
-        conn.close()
 
         # Prepare response message
         if lang == 'en':
@@ -434,7 +379,6 @@ def handle_calories(message):
                 f"📊 Всего калорий за сегодня: <b>{total_calories} ккал</b>")
 
         logger.info(f"Sending response: {response}")
-        # Send the response as a reply
         bot.reply_to(message, response, parse_mode='HTML')
         logger.info("Response sent")
 
@@ -443,48 +387,37 @@ def handle_calories(message):
         logger.info("State cleared")
 
     except ValueError as e:
-        logger.info(f"ValueError occurred: {e}")
-        lang = user_languages.get(message.chat.id, 'en')
+        logger.error(f"ValueError occurred: {e}")
+        lang = db.get_user_language(message.chat.id)
         bot.reply_to(message, messages[lang]['invalid_calories'])
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
-        lang = user_languages.get(message.chat.id, 'en')
+        lang = db.get_user_language(message.chat.id)
         bot.reply_to(message, f"❌ An error occurred: {str(e)}")
-
 
 def main():
     try:
-        logger.info("Starting bot initialization...")
-
-        init_db()
-        logger.info("Database initialized")
+        # Initialize database
+        init_database()
 
         # Schedule daily summary at 22:00
         schedule.every().day.at("22:00").do(send_daily_summary)
-        logger.info("Scheduled daily summary")
 
         # Start scheduler in a separate thread
         scheduler_thread = threading.Thread(target=schedule_checker)
         scheduler_thread.daemon = True
         scheduler_thread.start()
-        logger.info("Scheduler thread started")
 
-        logger.info("🤖 Bot is running... / Бот запущен...")
+        print("🤖 Bot is running... / Бот запущен...")
 
-        # Add more detailed error handling for polling
-        try:
-            logger.info("Starting bot polling...")
-            bot.infinity_polling(timeout=60, long_polling_timeout=5)
-        except Exception as polling_error:
-            logger.error(f"Polling error: {polling_error}")
-            raise
+
+        # Start the bot
+        bot.infinity_polling(timeout=60, long_polling_timeout = 5)
 
     except Exception as e:
-        logger.error(f"Main loop error: {e}")
+        print(f"Main loop error: {e}")
         time_module.sleep(10)
         main()
-
-
-if __name__ == "__main__":
-    logger.info("Script started")
-    main()
+    finally:
+        if db:
+            db.close()
