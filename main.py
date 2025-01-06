@@ -338,7 +338,7 @@ def handle_photo(message):
         bot.reply_to(message, messages[lang]['save_calories'], parse_mode='HTML')
         bot.set_state(message.from_user.id, UserState.awaiting_calories, message.chat.id)
 
-        except Exception as e:
+    except Exception as e:
         logger.error(f"Error in handle_photo: {e}")
         lang = get_user_language_safe(message.chat.id)
         
