@@ -338,8 +338,7 @@ def handle_photo(message):
 
         formatted_response = (
                     messages[lang]['nutritional_values'] + 
-                    '\n' + nutrition_info + 
-                    messages[lang]['approximate_note']
+                    '\n' + nutrition_info 
                 )
 
         bot.reply_to(message, formatted_response, parse_mode='HTML')
@@ -364,8 +363,7 @@ def handle_food_text(message):
 
         formatted_response = (
             messages[lang]['nutritional_values'] + 
-            '\n' + nutrition_info + 
-            messages[lang]['approximate_note']
+            '\n' + nutrition_info
         )
 
         bot.reply_to(message, formatted_response, parse_mode='HTML')
