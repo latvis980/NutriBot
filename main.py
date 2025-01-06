@@ -15,9 +15,6 @@ import logging
 from database_handler import init_database, db
 import psycopg2
 
-# Add this right after the imports
-telebot.apihelper.ENABLE_MIDDLEWARE = True
-
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -352,76 +349,80 @@ def handle_photo(message):
 
 @bot.message_handler(state=UserState.awaiting_food_text)
 def handle_food_text(message):
-            try:
-                lang = get_user_language_safe(message.chat.id)
-                bot.reply_to(message, messages[lang]['analyzing_text'], parse_mode='HTML')
+    try:
+        lang = get_user_language_safe(message.chat.id)
+        bot.reply_to(message, messages[lang]['analyzing_text'], parse_mode='HTML')
 
-                nutrition_response = text_model.generate_content(prompts[lang]['nutrition'].format(message.text))
-                nutrition_info = format_nutrition_response(nutrition_response.text)
+        nutrition_response = text_model.generate_content(prompts[lang]
+            ['nutrition'].format(message.text))
+        nutrition_info = format_nutrition_response(nutrition_response.text)
 
-                formatted_response = (
-                    messages[lang]['nutritional_values'] + 
-                    '\n' + nutrition_info + 
-                    messages[lang]['approximate_note']
-                )
+        formatted_response = (
+            messages[lang]['nutritional_values'] + 
+            '\n' + nutrition_info + 
+            messages[lang]['approximate_note']
+        )
 
-                bot.reply_to(message, formatted_response, parse_mode='HTML')
-                bot.reply_to(message, messages[lang]['save_calories'], parse_mode='HTML')
-                bot.set_state(message.from_user.id, UserState.awaiting_calories, message.chat.id)
+        bot.reply_to(message, formatted_response, parse_mode='HTML')
+        bot.reply_to(message, messages[lang]['save_calories'], parse_mode='HTML')
+        bot.set_state(message.from_user.id, UserState.awaiting_calories, message.chat.id)
 
-            except Exception as e:
-                logger.error(f"Error in handle_food_text: {e}")
-                bot.delete_state(message.from_user.id, message.chat.id)
-                lang = get_user_language_safe(message.chat.id)
-                bot.reply_to(message, messages[lang]['error'] + str(e), parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"Error in handle_food_text: {e}")
+        bot.delete_state(message.from_user.id, message.chat.id)
+        lang = get_user_language_safe(message.chat.id)
+        bot.reply_to(message, messages[lang]['error'] + str(e), parse_mode='HTML')
 
 @bot.message_handler(state=UserState.awaiting_calories)
 def handle_calories(message):
-            try:
-                logger.info(f"Received calorie input: {message.text}")
-                calories = int(message.text)
-                user_id = message.from_user.id
-                lang = get_user_language_safe(message.chat.id)
-                logger.info(f"Processing calories for user {user_id}")
+    try:
+        logger.info(f"Received calorie input: {message.text}")
+        calories = int(message.text)
+        user_id = message.from_user.id
+        lang = get_user_language_safe(message.chat.id)
+        logger.info(f"Processing calories for user {user_id}")
 
-                # Save the food entry
-                db.save_food_entry(user_id, calories)
-                logger.info("Calories saved to database")
+        # Save the food entry
+        db.save_food_entry(user_id, calories)
+        logger.info("Calories saved to database")
 
-                # Get daily summary entries
-                daily_entries = db.get_daily_summary(user_id)
-                total_calories = sum(entry[0] for entry in daily_entries)
-                logger.info(f"Total calories for today: {total_calories}")
+        # Get daily summary entries
+        daily_entries = db.get_daily_summary(user_id)
+        total_calories = sum(entry[0] for entry in daily_entries)
+        logger.info(f"Total calories for today: {total_calories}")
 
-                # Prepare response message
-                if lang == 'en':
-                    response = (
-                        f"<b>✅ {calories} calories added to your food diary!</b>\n\n"
-                        f"📊 Your total calories today: <b>{total_calories} kcal</b>")
-                else:
-                    response = (
-                        f"<b>✅ {calories} калорий добавлено в ваш дневник!</b>\n\n"
-                        f"📊 Всего калорий за сегодня: <b>{total_calories} ккал</b>")
+        # Prepare response message
+        if lang == 'en':
+            response = (
+                 f"<b>✅ {calories} calories added to your food diary!</b>\n\n"
+                f"📊 Your total calories today: <b>{total_calories} kcal</b>")
+        else:
+            response = (
+                f"<b>✅ {calories} калорий добавлено в ваш дневник!</b>\n\n"
+                f"📊 Всего калорий за сегодня: <b>{total_calories} ккал</b>")
 
-                logger.info(f"Sending response: {response}")
-                bot.reply_to(message, response, parse_mode='HTML')
-                logger.info("Response sent")
+        logger.info(f"Sending response: {response}")
+        bot.reply_to(message, response, parse_mode='HTML')
+        logger.info("Response sent")
 
-                # Clear the state
-                bot.delete_state(message.from_user.id, message.chat.id)
-                logger.info("State cleared")
+        # Clear the state
+        bot.delete_state(message.from_user.id, message.chat.id)
+        logger.info("State cleared")
 
-            except ValueError as e:
-                logger.error(f"ValueError occurred: {e}")
-                lang = get_user_language_safe(message.chat.id)
-                bot.reply_to(message, messages[lang]['invalid_calories'])
-            except Exception as e:
-                logger.error(f"Unexpected error: {e}")
-                lang = get_user_language_safe(message.chat.id)
-                bot.reply_to(message, f"❌ An error occurred: {str(e)}")
+    except ValueError as e:
+        logger.error(f"ValueError occurred: {e}")
+        lang = get_user_language_safe(message.chat.id)
+        bot.reply_to(message, messages[lang]['invalid_calories'])
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        lang = get_user_language_safe(message.chat.id)
+        bot.reply_to(message, f"❌ An error occurred: {str(e)}")
 
-def error_handler(message):
-    logger.error(f"Telegram error: {message}")
+# Update the error handler function
+@bot.middleware_handler(update_types=['update'])
+def error_handler(update):
+    if isinstance(update, Exception):
+        logger.error(f"Telegram error: {update}")
 
 def main():
     try:
@@ -431,9 +432,6 @@ def main():
         logger.info("Initializing database...")
         init_database()
         logger.info("Database initialized successfully")
-
-        # Register error handler
-        bot.register_middleware_handler(error_handler, update_types=['update'])
 
         # Schedule daily summary
         schedule.every().day.at("22:00").do(send_daily_summary)
@@ -456,6 +454,6 @@ def main():
         if db:
             logger.info("Closing database connection...")
             db.close()
-
+            
 if __name__ == "__main__":
     main()
