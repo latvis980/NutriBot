@@ -18,7 +18,8 @@ import psycopg2
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    force=True  # Ensure our configuration takes precedence
 )
 logger = logging.getLogger(__name__)
 
@@ -80,21 +81,20 @@ I can help you track your food and calculate calories.
         'analyzing': "🧪 <i>Analyzing your food image...</i>",
         'food_analysis': "🍽️ <b>Food Analysis:</b>\n",
         'nutritional_values': "📊 <b>Estimated Nutritional Values:</b>\n",
-        'approximate_note': "🔮 <i>Note: These are approximate values.</i>",
         'error': "❌ <b>Sorry, an error occurred:</b> ",
         'send_photo': "Please send a food photo for analysis! 📸",
         'choose_language': "Please choose your preferred language | Пожалуйста, выберите язык:",
         'language_set': "Language set to English! You can now track your food 🕺🏻",
         'save_calories': """<b>Would you like to save the calories into your food diary?</b>
 
-🧈 <i>If this is a large portion and full-fat ingredients have been used, type in the upper value from the range I gave you.</i>
+🧈 <i>For large portion and full-fat ingredients — type in the upper value from the range I gave you.</i>
 
-🌿 <i>If it's a small portion and low-fat ingredients have been used, type in the lower value.</i>""",
+🌿 <i>For small portion and low-fat ingredients, type in the lower value.</i>""",
         'calories_saved': "✔️ <b>Calories saved to your food diary!</b>",
         'invalid_calories': "❌ Please enter a valid number for calories.",
         'daily_summary': "📊 <b>Your daily calorie intake summary:</b>\n",
         'no_entries': "<i>No food entries recorded today.</i>",
-        'text_input': "Please describe your food in detail (e.g., '<i>grilled chicken breast with rice and vegetables</i>')",
+        'text_input': "Please describe your food in detail (e.g., 'grilled chicken breast with rice and vegetables')",
         'analyzing_text': "🔍 <i>Analyzing your food description...</i>"
     },
     'ru': {
@@ -108,21 +108,20 @@ I can help you track your food and calculate calories.
         'analyzing': "🧪 <i>Анализирую ваше фото...</i>",
         'food_analysis': "🍽️ <b>Анализ блюда:</b>\n",
         'nutritional_values': "📊 <b>Примерная пищевая ценность:</b>\n",
-        'approximate_note': "🔮 <i>Примечание: Это приблизительные значения.</i>",
         'error': "❌ <b>Извините, произошла ошибка:</b> ",
         'send_photo': "Пожалуйста, отправьте фотографию еды для анализа! 📸",
         'choose_language': "Please choose your preferred language / Пожалуйста, выберите язык:",
         'language_set': "<b>Давайте начнём вести дневник калорий</b> 🕺🏻",
         'save_calories': """<b>Хотите сохранить калории в дневник питания?</b>
 
-🧈 <i>Если это большая порция и использовались жирные ингредиенты, введите верхнее значение из указанного диапазона.</i>
+🧈 <i>Большая порция и жирные ингредиенты: введите верхнее значение из диапазона.</i>
 
-🌿 <i>Если порция маленькая и использовались низкокалорийные ингредиенты, введите нижнее значение.</i>""",
+🌿 <i>Маленькая порция и низкокалорийные ингредиенты: введите нижнее значение.</i>""",
         'calories_saved': "✔️ <b>Калории сохранены в ваш дневник!</b>",
         'invalid_calories': "❌ Пожалуйста, введите корректное число калорий.",
         'daily_summary': "📊 <b>Итоги вашего дневного потребления калорий:</b>\n",
         'no_entries': "<i>Сегодня нет записей о приёме пищи.</i>",
-        'text_input': "Пожалуйста, опишите вашу еду подробно (например, '<i>куриная грудка на гриле с рисом и овощами</i>')",
+        'text_input': "Пожалуйста, опишите вашу еду подробно (например, 'куриная грудка на гриле с рисом и овощами')",
         'analyzing_text': "🔍 <i>Анализирую описание вашей еды...</i>"
     }
 }
@@ -143,7 +142,7 @@ prompts = {
         3. Carbohydrates (g)
         4. Fat (g)
 
-        Format as a clear list with approximate values. Consider this an estimation only.
+        Format as a clear list with approximate values. Consider this an estimation only, use this 🔮 emoji for the note about approximation.
         """
     },
     'ru': {
@@ -161,7 +160,7 @@ prompts = {
         4. Жиры (г)
 
         Оформи в виде четкого списка с примерными значениями на русском языке.
-        Учти, что это приблизительная оценка.
+        Добавь комментарий, что это приблизительная оценка с таким эмодзи 🔮.
         """
     }
 }
