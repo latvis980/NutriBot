@@ -15,6 +15,9 @@ import logging
 from database_handler import init_database, db
 import psycopg2
 
+# Add this right after the imports
+telebot.apihelper.ENABLE_MIDDLEWARE = True
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -42,6 +45,9 @@ try:
         if not value:
             raise ValueError(f"Missing required environment variable: {var}")
         logger.info(f"{var} is set")
+
+    # Enable middleware
+    telebot.apihelper.ENABLE_MIDDLEWARE = True
 
     # Initialize bot
     state_storage = StateMemoryStorage()
