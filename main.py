@@ -279,6 +279,7 @@ def callback_language(call):
         logger.error(f"Error in callback_language: {e}")
         bot.answer_callback_query(call.id, "An error occurred. Please try again.")
 
+# Replace the current echo_all handler with this more intelligent version:
 @bot.message_handler(
     func=lambda message: message.content_type == 'text' and 
     not message.text.startswith('/') and 
@@ -288,12 +289,34 @@ def callback_language(call):
     ] and 
     not bot.get_state(message.from_user.id, message.chat.id)
 )
-def echo_all(message):
+def handle_message(message):
     try:
         lang = get_user_language_safe(message.chat.id)
-        bot.reply_to(message, messages[lang]['send_photo'])
+        # Check if the message looks like a food description
+        # (more than one word and/or contains numbers)
+        words = message.text.split()
+        has_numbers = any(char.isdigit() for char in message.text)
+
+        if len(words) > 1 or has_numbers:
+            # Treat as food text input
+            bot.set_state(message.from_user.id, 
+                         UserState.awaiting_food_text, 
+                         message.chat.id)
+            handle_food_text(message)
+        else:
+            # Treat as unknown command
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            if lang == 'en':
+                markup.add("📸 Add photo", "⌨️ Add as text")
+            else:
+                markup.add("📸 Добавить фото", "⌨️ Добавить текстом")
+
+            bot.reply_to(message, 
+                        messages[lang]['welcome'],
+                        parse_mode='HTML',
+                        reply_markup=markup)
     except Exception as e:
-        logger.error(f"Error in echo_all: {e}")
+        logger.error(f"Error in handle_message: {e}")
 
 @bot.message_handler(func=lambda message: message.text in [
     "📸 Add photo", "📸 Добавить фото", 
