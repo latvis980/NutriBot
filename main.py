@@ -418,9 +418,11 @@ def handle_calories(message):
         lang = get_user_language_safe(message.chat.id)
         bot.reply_to(message, f"❌ An error occurred: {str(e)}")
 
+...
+
 # Update the error handler function
 @bot.middleware_handler(update_types=['update'])
-def error_handler(update):
+def error_handler(bot_instance, update):
     if isinstance(update, Exception):
         logger.error(f"Telegram error: {update}")
 
@@ -454,6 +456,6 @@ def main():
         if db:
             logger.info("Closing database connection...")
             db.close()
-            
+
 if __name__ == "__main__":
     main()
