@@ -33,6 +33,7 @@ class UserState(StatesGroup):
     language = State()
     awaiting_calories = State()
     awaiting_food_text = State()
+    awaiting_donation_response = State()  # New state
 
 # Initialize core components
 try:
@@ -69,6 +70,7 @@ except Exception as e:
     raise
 
 # Messages dictionary
+# Messages dictionary
 messages = {
     'en': {
         'welcome': """
@@ -95,7 +97,14 @@ I can help you track your food and calculate calories.
         'daily_summary': "📊 <b>Your daily calorie intake summary:</b>\n",
         'no_entries': "<i>No food entries recorded today.</i>",
         'text_input': "Please describe your food in detail (e.g., 'grilled chicken breast with rice and vegetables')",
-        'analyzing_text': "🔍 <i>Analyzing your food description...</i>"
+        'analyzing_text': "🔍 <i>Analyzing your food description...</i>",
+        'donation_prompt': """
+<b>Support NutriBot! 🤖</b>
+
+This bot uses computer vision technology to analyze your food, which consumes AI tokens. You can make a donation of €1 via Stripe to cover a week of tokens consumption and support further development.
+
+<i>Choose an option below:</i>
+"""
     },
     'ru': {
         'welcome': """
@@ -122,10 +131,17 @@ I can help you track your food and calculate calories.
         'daily_summary': "📊 <b>Итоги вашего дневного потребления калорий:</b>\n",
         'no_entries': "<i>Сегодня нет записей о приёме пищи.</i>",
         'text_input': "Пожалуйста, опишите вашу еду подробно (например, 'куриная грудка на гриле с рисом и овощами')",
-        'analyzing_text': "🔍 <i>Анализирую описание вашей еды...</i>"
+        'analyzing_text': "🔍 <i>Анализирую описание вашей еды...</i>",
+        'donation_prompt': """
+<b>Поддержите NutriBot! 🤖</b>
+
+Этот бот использует технологию компьютерного зрения для анализа вашей еды, которая потребляет AI-токены. Вы можете сделать пожертвование в размере €1 через Stripe, чтобы покрыть недельное потребление токенов и поддержать дальнейшее развитие.
+
+<i>Выберите вариант ниже:</i>
+"""
     }
 }
-
+    
 # Gemini prompts
 prompts = {
     'en': {
@@ -214,25 +230,41 @@ def send_daily_summary():
         for user_id, total_calories in daily_summaries:
             try:
                 lang = get_user_language_safe(user_id)
-                if total_calories:
-                    prompt = f"""Generate a friendly daily calorie intake summary in {'Russian' if lang == 'ru' else 'English'} for:
-                    Total calories: {total_calories}
-                    Include:
-                    1. The approximate nature of the calculations
-                    2. A reasonable error margin (±10-15%)
-                    3. A brief comment on whether this is within typical daily requirements
-                    Keep it concise and friendly."""
 
+                # Send regular summary
+                if total_calories:
+                    prompt = f"""Generate a friendly daily calorie intake summary..."""
                     response = text_model.generate_content(prompt)
                     summary = response.text
-
                     bot.send_message(user_id,
-                                    messages[lang]['daily_summary'] + summary,
-                                    parse_mode='HTML')
+                                   messages[lang]['daily_summary'] + summary,
+                                   parse_mode='HTML')
                 else:
                     bot.send_message(user_id, 
-                                    messages[lang]['no_entries'],
-                                    parse_mode='HTML')
+                                   messages[lang]['no_entries'],
+                                   parse_mode='HTML')
+
+                # Check if donation prompt is due
+                if db.should_show_donation_prompt(user_id):
+                    markup = types.InlineKeyboardMarkup()
+                    donate_button = types.InlineKeyboardButton(
+                        "Make donation" if lang == 'en' else "Сделать пожертвование",
+                        url="https://t.me/MyFoodDiaryPaymentBot"
+                    )
+                    continue_button = types.InlineKeyboardButton(
+                        "Continue using for free" if lang == 'en' else "Продолжить бесплатно",
+                        callback_data="continue_free"
+                    )
+                    markup.add(donate_button, continue_button)
+
+                    bot.send_message(
+                        user_id,
+                        messages[lang]['donation_prompt'],
+                        parse_mode='HTML',
+                        reply_markup=markup
+                    )
+                    db.update_last_donation_prompt(user_id)
+
             except Exception as e:
                 logger.error(f"Error sending summary to user {user_id}: {e}")
     except Exception as e:
@@ -336,11 +368,27 @@ def handle_input_choice(message):
     except Exception as e:
         logger.error(f"Error in handle_input_choice: {e}")
 
+@bot.callback_query_handler(func=lambda call: call.data == "continue_free")
+def handle_continue_free(call):
+    try:
+        bot.answer_callback_query(call.id)
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        return True
+    except Exception as e:
+        logger.error(f"Error in handle_continue_free: {e}")
+        return False
+
+
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     try:
+        db.save_user_first_use(message.from_user.id)  # Track first use
         lang = get_user_language_safe(message.chat.id)
-        bot.reply_to(message, messages[lang]['analyzing'], parse_mode='HTML')
+        bot.reply_to(
+            message,
+            messages[lang]['analyzing'],
+            parse_mode='HTML'
+        )
 
         file_info = bot.get_file(message.photo[-1].file_id)
         photo_url = f"https://api.telegram.org/file/bot{os.environ['TELEGRAM_TOKEN']}/{file_info.file_path}"
@@ -371,12 +419,12 @@ def handle_photo(message):
     except Exception as e:
         logger.error(f"Error in handle_photo: {e}")
         lang = get_user_language_safe(message.chat.id)
-        
         bot.reply_to(message, messages[lang]['error'] + str(e), parse_mode='HTML')
 
 @bot.message_handler(state=UserState.awaiting_food_text)
 def handle_food_text(message):
     try:
+        db.save_user_first_use(message.from_user.id)
         lang = get_user_language_safe(message.chat.id)
         bot.reply_to(message, messages[lang]['analyzing_text'], parse_mode='HTML')
 
@@ -443,8 +491,6 @@ def handle_calories(message):
         logger.error(f"Unexpected error: {e}")
         lang = get_user_language_safe(message.chat.id)
         bot.reply_to(message, f"❌ An error occurred: {str(e)}")
-
-...
 
 # Update the error handler function
 @bot.middleware_handler(update_types=['update'])
