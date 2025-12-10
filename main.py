@@ -62,8 +62,8 @@ try:
 
     # Initialize Gemini
     genai.configure(api_key=os.environ['GEMINI_API_KEY'])
-    vision_model = genai.GenerativeModel('gemini-1.5-flash')
-    text_model = genai.GenerativeModel('gemini-1.5-flash')
+    vision_model = genai.GenerativeModel('gemini-2.0-flash')
+    text_model = genai.GenerativeModel('gemini-2.0-flash')
     logger.info("Gemini initialized successfully")
 except Exception as e:
     logger.error(f"Initialization error: {str(e)}", exc_info=True)
