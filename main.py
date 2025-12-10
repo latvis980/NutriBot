@@ -3,8 +3,7 @@ import telebot
 from telebot.handler_backends import State, StatesGroup
 from telebot.storage import StateMemoryStorage
 from telebot import types
-from google import genai
-from google.genai import types as genai_types
+from openai import OpenAI
 from PIL import Image
 import io
 import requests
@@ -21,13 +20,13 @@ import base64
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    force=True  # Ensure our configuration takes precedence
+    force=True
 )
 logger = logging.getLogger(__name__)
 
 # Add startup banner
 logger.info("=" * 50)
-logger.info("Starting NutriBot")
+logger.info("Starting NutriBot with OpenAI")
 logger.info("=" * 50)
 
 # States for food diary
@@ -35,12 +34,12 @@ class UserState(StatesGroup):
     language = State()
     awaiting_calories = State()
     awaiting_food_text = State()
-    awaiting_donation_response = State()  # New state
+    awaiting_donation_response = State()
 
 # Initialize core components
 try:
     logger.info("Checking environment variables...")
-    required_vars = ['TELEGRAM_TOKEN', 'GEMINI_API_KEY', 'DATABASE_URL']
+    required_vars = ['TELEGRAM_TOKEN', 'OPENAI_API_KEY', 'DATABASE_URL']
     for var in required_vars:
         value = os.environ.get(var)
         if not value:
@@ -62,10 +61,10 @@ try:
     bot.add_custom_filter(telebot.custom_filters.StateFilter(bot))
     logger.info("Bot initialized successfully")
 
-    # Initialize Gemini with new SDK
-    client = genai.Client(api_key=os.environ['GEMINI_API_KEY'])
-    MODEL_ID = 'gemini-2.0-flash-lite'  # Using flash-lite for better free tier limits
-    logger.info(f"Gemini client initialized with model: {MODEL_ID}")
+    # Initialize OpenAI client
+    openai_client = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
+    MODEL_ID = 'gpt-4o-mini'  # Cost-effective model with vision capabilities
+    logger.info(f"OpenAI client initialized with model: {MODEL_ID}")
 except Exception as e:
     logger.error(f"Initialization error: {str(e)}", exc_info=True)
     raise
@@ -101,7 +100,7 @@ I can help you track your food and calculate calories.
         'donation_prompt': """
 <b>Support NutriBot! 🤖</b>
 
-This bot uses computer vision technology to analyze your food, which consumes AI tokens. You can make a donation of €1 via Stripe to cover a week of tokens consumption and support further development.
+This bot uses AI technology to analyze your food. You can make a donation of €1 via Stripe to support further development.
 
 <i>Choose an option below:</i>
 """
@@ -135,49 +134,41 @@ This bot uses computer vision technology to analyze your food, which consumes AI
         'donation_prompt': """
 <b>Поддержите NutriBot! 🤖</b>
 
-Этот бот использует технологию компьютерного зрения для анализа вашей еды, которая потребляет AI-токены. Вы можете сделать пожертвование в размере €1 через Stripe, чтобы покрыть недельное потребление токенов и поддержать дальнейшее развитие.
+Этот бот использует AI технологию для анализа вашей еды. Вы можете сделать пожертвование в размере €1 через Stripe, чтобы поддержать дальнейшее развитие.
 
 <i>Выберите вариант ниже:</i>
 """
     }
 }
 
-# Gemini prompts
+# OpenAI prompts
 prompts = {
     'en': {
-        'food': """
-        Analyze this food image and provide:
-        1. What food items are present
-        2. Brief description of the dish
-        Keep the response concise and clear.
-        """,
-        'nutrition': """
-        Based on the food identified ({}), provide an estimation of:
-        1. Calories (kcal)
-        2. Protein (g)
-        3. Carbohydrates (g)
-        4. Fat (g)
+        'food': """Analyze this food image and provide:
+1. What food items are present
+2. Brief description of the dish
+Keep the response concise and clear.""",
+        'nutrition': """Based on the food identified ({}), provide an estimation of:
+1. Calories (kcal) - give a range
+2. Protein (g)
+3. Carbohydrates (g)
+4. Fat (g)
 
-        Format as a clear list with approximate values. Consider this an estimation only, use this 🔮 emoji for the note about approximation.
-        """
+Format as a clear list with approximate values. Note that this is an estimation only 🔮."""
     },
     'ru': {
-        'food': """
-        Проанализируй это изображение еды и укажи:
-        1. Какие продукты присутствуют
-        2. Краткое описание блюда
-        Дай краткий и четкий ответ на русском языке.
-        """,
-        'nutrition': """
-        На основе определенных продуктов ({}), предоставь оценку:
-        1. Калории (ккал)
-        2. Белки (г)
-        3. Углеводы (г)
-        4. Жиры (г)
+        'food': """Проанализируй это изображение еды и укажи:
+1. Какие продукты присутствуют
+2. Краткое описание блюда
+Дай краткий и четкий ответ на русском языке.""",
+        'nutrition': """На основе определенных продуктов ({}), предоставь оценку:
+1. Калории (ккал) - дай диапазон
+2. Белки (г)
+3. Углеводы (г)
+4. Жиры (г)
 
-        Оформи в виде четкого списка с примерными значениями на русском языке.
-        Добавь комментарий, что это приблизительная оценка с таким эмодзи 🔮.
-        """
+Оформи в виде четкого списка с примерными значениями на русском языке.
+Добавь комментарий, что это приблизительная оценка 🔮."""
     }
 }
 
@@ -193,25 +184,23 @@ def format_nutrition_response(text):
     # First handle bold markdown
     parts = text.split('**')
     for i in range(len(parts)):
-        if i % 2 == 1:  # Odd indexes are inside ** **
+        if i % 2 == 1:
             parts[i] = f'<b>{parts[i]}</b>'
     text = ''.join(parts)
 
-    # Replace bullet points and ensure proper formatting
+    # Replace bullet points
     lines = text.split('\n')
     formatted_lines = []
     for line in lines:
         line = line.strip()
         if line.startswith('*') or line.startswith('-'):
             line = f"• {line[1:].strip()}"
-
         if '_' in line:
             parts = line.split('_')
             for i in range(len(parts)):
                 if i % 2 == 1:
                     parts[i] = f'<i>{parts[i]}</i>'
             line = ''.join(parts)
-
         formatted_lines.append(line)
 
     return '\n'.join(formatted_lines)
@@ -225,31 +214,45 @@ def schedule_checker():
         logger.error(f"Schedule checker error: {e}")
 
 def generate_text_content(prompt):
-    """Generate text content using the new SDK"""
+    """Generate text content using OpenAI"""
     try:
-        response = client.models.generate_content(
+        response = openai_client.chat.completions.create(
             model=MODEL_ID,
-            contents=prompt
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1000
         )
-        return response.text
+        return response.choices[0].message.content
     except Exception as e:
         logger.error(f"Error generating text content: {e}")
         raise
 
-def generate_vision_content(prompt, image_bytes, mime_type="image/jpeg"):
-    """Generate content from image using the new SDK"""
+def generate_vision_content(prompt, image_bytes):
+    """Generate content from image using OpenAI Vision"""
     try:
         # Encode image to base64
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 
-        response = client.models.generate_content(
+        response = openai_client.chat.completions.create(
             model=MODEL_ID,
-            contents=[
-                genai_types.Part.from_text(prompt),
-                genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
-            ]
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=1000
         )
-        return response.text
+        return response.choices[0].message.content
     except Exception as e:
         logger.error(f"Error generating vision content: {e}")
         raise
@@ -261,13 +264,11 @@ def send_daily_summary():
             try:
                 lang = get_user_language_safe(user_id)
 
-                # Send regular summary
                 if total_calories:
-                    prompt = f"""Generate a friendly daily calorie intake summary..."""
+                    prompt = f"Generate a brief, friendly summary for someone who consumed {total_calories} calories today. Keep it to 2-3 sentences."
                     response = generate_text_content(prompt)
-                    summary = response
                     bot.send_message(user_id,
-                                   messages[lang]['daily_summary'] + summary,
+                                   messages[lang]['daily_summary'] + response,
                                    parse_mode='HTML')
                 else:
                     bot.send_message(user_id, 
@@ -341,7 +342,6 @@ def callback_language(call):
         logger.error(f"Error in callback_language: {e}")
         bot.answer_callback_query(call.id, "An error occurred. Please try again.")
 
-# Replace the current echo_all handler with this more intelligent version:
 @bot.message_handler(
     func=lambda message: message.content_type == 'text' and 
     not message.text.startswith('/') and 
@@ -354,19 +354,15 @@ def callback_language(call):
 def handle_message(message):
     try:
         lang = get_user_language_safe(message.chat.id)
-        # Check if the message looks like a food description
-        # (more than one word and/or contains numbers)
         words = message.text.split()
         has_numbers = any(char.isdigit() for char in message.text)
 
         if len(words) > 1 or has_numbers:
-            # Treat as food text input
             bot.set_state(message.from_user.id, 
                          UserState.awaiting_food_text, 
                          message.chat.id)
             handle_food_text(message)
         else:
-            # Treat as unknown command
             markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
             if lang == 'en':
                 markup.add("📸 Add photo", "⌨️ Add as text")
@@ -412,7 +408,7 @@ def handle_continue_free(call):
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     try:
-        db.save_user_first_use(message.from_user.id)  # Track first use
+        db.save_user_first_use(message.from_user.id)
         lang = get_user_language_safe(message.chat.id)
         bot.reply_to(
             message,
@@ -425,7 +421,7 @@ def handle_photo(message):
         response = requests.get(photo_url)
         image_bytes = response.content
 
-        # Use new SDK for vision
+        # Use OpenAI Vision
         food_description = generate_vision_content(prompts[lang]['food'], image_bytes)
 
         formatted_food = format_nutrition_response(food_description)
@@ -433,7 +429,7 @@ def handle_photo(message):
                      messages[lang]['food_analysis'] + formatted_food, 
                      parse_mode='HTML')
 
-        # Get and format nutritional info
+        # Get nutritional info
         nutrition_info = generate_text_content(prompts[lang]['nutrition'].format(food_description))
         nutrition_info = format_nutrition_response(nutrition_info)
 
@@ -485,16 +481,13 @@ def handle_calories(message):
         lang = get_user_language_safe(message.chat.id)
         logger.info(f"Processing calories for user {user_id}")
 
-        # Save the food entry
         db.save_food_entry(user_id, calories)
         logger.info("Calories saved to database")
 
-        # Get daily summary entries
         daily_entries = db.get_daily_summary(user_id)
         total_calories = sum(entry[0] for entry in daily_entries)
         logger.info(f"Total calories for today: {total_calories}")
 
-        # Prepare response message
         if lang == 'en':
             response = (
                  f"<b>✅ {calories} calories added to your food diary!</b>\n\n"
@@ -508,7 +501,6 @@ def handle_calories(message):
         bot.reply_to(message, response, parse_mode='HTML')
         logger.info("Response sent")
 
-        # Clear the state
         bot.delete_state(message.from_user.id, message.chat.id)
         logger.info("State cleared")
 
@@ -521,7 +513,6 @@ def handle_calories(message):
         lang = get_user_language_safe(message.chat.id)
         bot.reply_to(message, f"❌ An error occurred: {str(e)}")
 
-# Update the error handler function
 @bot.middleware_handler(update_types=['update'])
 def error_handler(bot_instance, update):
     if isinstance(update, Exception):
@@ -531,16 +522,13 @@ def main():
     try:
         logger.info("Starting main function")
 
-        # Schedule daily summary
         schedule.every().day.at("22:00").do(send_daily_summary)
 
-        # Start scheduler thread
         scheduler_thread = threading.Thread(target=schedule_checker)
         scheduler_thread.daemon = True
         scheduler_thread.start()
         logger.info("Scheduler started")
 
-        # Start bot
         logger.info("Starting bot polling...")
         bot.infinity_polling(timeout=60, long_polling_timeout=5)
 

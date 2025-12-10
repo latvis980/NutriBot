@@ -1,6 +1,6 @@
 python-telegram-bot
 pillow
-google-genai
+openai
 python-dotenv
 schedule
 requests
