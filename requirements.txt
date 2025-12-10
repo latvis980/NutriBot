@@ -1,9 +1,9 @@
 python-telegram-bot
 pillow
-google-generativeai
+google-genai
 python-dotenv
 schedule
 requests
 telebot
 pytelegrambotapi
-psycopg2-binary==2.9.9 
+psycopg2-binary==2.9.9

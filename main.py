@@ -3,7 +3,8 @@ import telebot
 from telebot.handler_backends import State, StatesGroup
 from telebot.storage import StateMemoryStorage
 from telebot import types
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 from PIL import Image
 import io
 import requests
@@ -14,6 +15,7 @@ import time as time_module
 import logging
 from database_handler import init_database, db
 import psycopg2
+import base64
 
 # Set up logging
 logging.basicConfig(
@@ -50,7 +52,7 @@ try:
     global db
     db = init_database()
     logger.info("Database initialized successfully")
-    
+
     # Enable middleware
     telebot.apihelper.ENABLE_MIDDLEWARE = True
 
@@ -60,16 +62,14 @@ try:
     bot.add_custom_filter(telebot.custom_filters.StateFilter(bot))
     logger.info("Bot initialized successfully")
 
-    # Initialize Gemini
-    genai.configure(api_key=os.environ['GEMINI_API_KEY'])
-    vision_model = genai.GenerativeModel('gemini-2.0-flash-lite')
-    text_model = genai.GenerativeModel('gemini-2.0-flash-lite')
-    logger.info("Gemini initialized successfully")
+    # Initialize Gemini with new SDK
+    client = genai.Client(api_key=os.environ['GEMINI_API_KEY'])
+    MODEL_ID = 'gemini-2.0-flash-lite'  # Using flash-lite for better free tier limits
+    logger.info(f"Gemini client initialized with model: {MODEL_ID}")
 except Exception as e:
     logger.error(f"Initialization error: {str(e)}", exc_info=True)
     raise
 
-# Messages dictionary
 # Messages dictionary
 messages = {
     'en': {
@@ -89,7 +89,7 @@ I can help you track your food and calculate calories.
         'language_set': "Language set to English! You can now track your food 🕺🏻",
         'save_calories': """<b>Would you like to save the calories into your food diary?</b>
 
-🧈 <i>For large portion and full-fat ingredients — type in the upper value from the range I gave you.</i>
+🧈 <i>For large portion and full-fat ingredients – type in the upper value from the range I gave you.</i>
 
 🌿 <i>For small portion and low-fat ingredients, type in the lower value.</i>""",
         'calories_saved': "✔️ <b>Calories saved to your food diary!</b>",
@@ -141,7 +141,7 @@ This bot uses computer vision technology to analyze your food, which consumes AI
 """
     }
 }
-    
+
 # Gemini prompts
 prompts = {
     'en': {
@@ -224,6 +224,36 @@ def schedule_checker():
     except Exception as e:
         logger.error(f"Schedule checker error: {e}")
 
+def generate_text_content(prompt):
+    """Generate text content using the new SDK"""
+    try:
+        response = client.models.generate_content(
+            model=MODEL_ID,
+            contents=prompt
+        )
+        return response.text
+    except Exception as e:
+        logger.error(f"Error generating text content: {e}")
+        raise
+
+def generate_vision_content(prompt, image_bytes, mime_type="image/jpeg"):
+    """Generate content from image using the new SDK"""
+    try:
+        # Encode image to base64
+        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+
+        response = client.models.generate_content(
+            model=MODEL_ID,
+            contents=[
+                genai_types.Part.from_text(prompt),
+                genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+            ]
+        )
+        return response.text
+    except Exception as e:
+        logger.error(f"Error generating vision content: {e}")
+        raise
+
 def send_daily_summary():
     try:
         daily_summaries = db.get_all_daily_summaries()
@@ -234,8 +264,8 @@ def send_daily_summary():
                 # Send regular summary
                 if total_calories:
                     prompt = f"""Generate a friendly daily calorie intake summary..."""
-                    response = text_model.generate_content(prompt)
-                    summary = response.text
+                    response = generate_text_content(prompt)
+                    summary = response
                     bot.send_message(user_id,
                                    messages[lang]['daily_summary'] + summary,
                                    parse_mode='HTML')
@@ -393,10 +423,10 @@ def handle_photo(message):
         file_info = bot.get_file(message.photo[-1].file_id)
         photo_url = f"https://api.telegram.org/file/bot{os.environ['TELEGRAM_TOKEN']}/{file_info.file_path}"
         response = requests.get(photo_url)
-        image = Image.open(io.BytesIO(response.content))
+        image_bytes = response.content
 
-        vision_response = vision_model.generate_content([prompts[lang]['food'], image])
-        food_description = vision_response.text
+        # Use new SDK for vision
+        food_description = generate_vision_content(prompts[lang]['food'], image_bytes)
 
         formatted_food = format_nutrition_response(food_description)
         bot.reply_to(message, 
@@ -404,8 +434,8 @@ def handle_photo(message):
                      parse_mode='HTML')
 
         # Get and format nutritional info
-        nutrition_response = text_model.generate_content(prompts[lang]['nutrition'].format(food_description))
-        nutrition_info = format_nutrition_response(nutrition_response.text)
+        nutrition_info = generate_text_content(prompts[lang]['nutrition'].format(food_description))
+        nutrition_info = format_nutrition_response(nutrition_info)
 
         formatted_response = (
                     messages[lang]['nutritional_values'] + 
@@ -428,9 +458,8 @@ def handle_food_text(message):
         lang = get_user_language_safe(message.chat.id)
         bot.reply_to(message, messages[lang]['analyzing_text'], parse_mode='HTML')
 
-        nutrition_response = text_model.generate_content(prompts[lang]
-            ['nutrition'].format(message.text))
-        nutrition_info = format_nutrition_response(nutrition_response.text)
+        nutrition_info = generate_text_content(prompts[lang]['nutrition'].format(message.text))
+        nutrition_info = format_nutrition_response(nutrition_info)
 
         formatted_response = (
             messages[lang]['nutritional_values'] + 
